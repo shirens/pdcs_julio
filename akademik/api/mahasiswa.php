@@ -12,19 +12,20 @@ switch ($method) {
 
         // Get by ID
         if (isset($_GET['id'])) {
-            $id = (int) $_GET['id'];
+            $id = (int) ($_GET['id'] ?? 0);
 
-            $q = "SELECT m.id, m.nama, m.nim,
+            $stmt =mysqli_prepare( $koneksi, "SELECT m.id, m.nama, m.nim,
                          j.nama_jurusan AS jurusan
                   FROM mahasiswa m
                   LEFT JOIN jurusan j ON m.jurusan_id = j.id
-                  WHERE m.id = '$id'";
+                  WHERE m.id = ?"
+                  );
 
-            $r = mysqli_query($koneksi, $q);
-
-            if (!$r) {
-                sendResponse(false, mysqli_error($koneksi), null, 500);
-            }
+            mysqli_stmt_bind_param($stmt, "i", $id);
+            mysqli_stmt_execute($stmt);
+            $r = mysqli_stmt_get_result($stmt);
+            if (!$r) 
+              gagalQuery($koneksi);
 
             $data = mysqli_fetch_assoc($r);
 
@@ -156,11 +157,15 @@ switch ($method) {
             sendResponse(false, "nim sudah terdaftar", null, 409);
         }
 
-        $q = "INSERT INTO mahasiswa
+        $stmt = mysqli_prepare(
+            $koneksi, "INSERT INTO mahasiswa
               (nama, nim, jurusan_id, created_at)
-              VALUES ('$nama', '$nim', '$jurusan_id', CURDATE())";
+              VALUES (?,?,?,CURDATE())"
+        );
 
-        if (mysqli_query($koneksi, $q)) {
+        mysqli_stmt_bind_param($stmt, "ssi", $nama, $nim, $jurusan_id);
+
+        if (mysqli_stmt_execute($stmt)) {
             sendResponse(
                 true,
                 "data tersimpan",
@@ -168,7 +173,7 @@ switch ($method) {
                 201
             );
         } else {
-            sendResponse(false, mysqli_error($koneksi), null, 500);
+            gagalQuery($koneksi);
         }
 
         break;
@@ -258,24 +263,55 @@ switch ($method) {
 
     case 'DELETE':
 
-    $id = $_GET['id'];
-    $cek_mahasiswa = mysqli_query(
-            $koneksi,
-            "SELECT id FROM mahasiswa WHERE id='$id'"
-        );
-   if (mysqli_num_rows($cek_mahasiswa) == 0) {
+    // Validasi ID
+    if (!isset($_GET['id']) || !filter_var($_GET['id'], FILTER_VALIDATE_INT) || (int)$_GET['id'] < 1) {
+        sendResponse(false, "ID harus berupa bilangan bulat positif", null, 400);
+    }
+
+    $id = (int) $_GET['id'];
+
+    // Cek mahasiswa berdasarkan ID
+    $stmt = mysqli_prepare($koneksi, "SELECT id FROM mahasiswa WHERE id = ?");
+
+    if (!$stmt) {
+        gagalQuery($koneksi);
+    }
+
+    mysqli_stmt_bind_param($stmt, "i", $id);
+    mysqli_stmt_execute($stmt);
+
+    $cek_mahasiswa = mysqli_stmt_get_result($stmt);
+
+    if (!$cek_mahasiswa) {
+        gagalQuery($koneksi);
+    }
+
+    // Jika mahasiswa tidak ditemukan
+    if (mysqli_num_rows($cek_mahasiswa) == 0) {
+        sendResponse(false, "Mahasiswa tidak ditemukan", null, 404);
+    }
+
+    // Hapus mahasiswa
+    $stmt = mysqli_prepare($koneksi, "DELETE FROM mahasiswa WHERE id = ?");
+
+    if (!$stmt) {
+        gagalQuery($koneksi);
+    }
+
+    mysqli_stmt_bind_param($stmt, "i", $id);
+
+    if (mysqli_stmt_execute($stmt)) {
+        if (mysqli_stmt_affected_rows($stmt) > 0) {
+            sendResponse(true, "Data berhasil dihapus", ["id" => $id], 200);
+        } else {
             sendResponse(false, "Mahasiswa tidak ditemukan", null, 404);
         }
-    $q = "DELETE FROM mahasiswa
-              WHERE id ='$id'";
-    if (mysqli_query($koneksi, $q)) {
-            sendResponse(true, "data berhasil dihapus", ["id" => $id], 200);
-        } else {
-            sendResponse(false, mysqli_error($koneksi), null, 500);
-        }
+    } else {
+        gagalQuery($koneksi);
+    }
 
-        break;
-
+    break;
+    
     default:
         sendResponse(false, "Method tidak diizinkan", null, 405);
         break;
